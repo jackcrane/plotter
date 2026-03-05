@@ -7,6 +7,7 @@ const CUT_DEPTH_MM = 3;
 const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
 const WRAP_ANGLE_DEGREES = 355;
+const ENGRAVING_MARGIN_IN = 0.125;
 const GEAR_THICKNESS_MM = 10;
 const GEAR_TOOTH_COUNT = 38;
 const GEAR_CIRCULAR_PITCH_MM =
@@ -72,14 +73,15 @@ const mapSeriesToAngularNodes = ({
   zMaxMm,
 }) => {
   const cutHeightMm = CUT_HEIGHT_MM;
-  const zMarginMm = cutHeightMm * 0.6;
-  const zSpanMm = Math.max(0.001, zMaxMm - zMinMm - zMarginMm * 2);
+  const zCenterMinMm = zMinMm + cutHeightMm / 2;
+  const zCenterMaxMm = zMaxMm - cutHeightMm / 2;
+  const zSpanMm = Math.max(0.001, zCenterMaxMm - zCenterMinMm);
   const degRange = Math.max(0.001, maxDeg - minDeg);
 
   return series.map((sample) => {
     const angleDeg = (sample.timeSec / durationSec) * WRAP_ANGLE_DEGREES;
     const t = (sample.deg - minDeg) / degRange;
-    const z = zMinMm + zMarginMm + clamp(t, 0, 1) * zSpanMm;
+    const z = zCenterMinMm + clamp(t, 0, 1) * zSpanMm;
     return [formatNumber(angleDeg), formatNumber(z)];
   });
 };
@@ -215,15 +217,27 @@ export const downloadStackedDiscScad = ({
   }
 
   const discHeightMm = DISC_HEIGHT_IN * INCH_TO_MM;
-  const halfHeightMm = discHeightMm / 2;
+  const engravingMarginMm = ENGRAVING_MARGIN_IN * INCH_TO_MM;
+  const totalMarginsMm = engravingMarginMm * 3;
+  const engravingSpanMm = discHeightMm - totalMarginsMm;
+  const singleEngravingSpanMm = engravingSpanMm / 2;
+
+  if (singleEngravingSpanMm <= CUT_HEIGHT_MM) {
+    throw new Error("Disc height is too small for requested engraving margins.");
+  }
+
+  const leftZMinMm = engravingMarginMm;
+  const leftZMaxMm = leftZMinMm + singleEngravingSpanMm;
+  const rightZMinMm = leftZMaxMm + engravingMarginMm;
+  const rightZMaxMm = rightZMinMm + singleEngravingSpanMm;
 
   const leftNodes = mapSeriesToAngularNodes({
     series: leftSeries,
     durationSec,
     minDeg,
     maxDeg,
-    zMinMm: 0,
-    zMaxMm: halfHeightMm,
+    zMinMm: leftZMinMm,
+    zMaxMm: leftZMaxMm,
   });
 
   const rightNodes = mapSeriesToAngularNodes({
@@ -231,8 +245,8 @@ export const downloadStackedDiscScad = ({
     durationSec,
     minDeg,
     maxDeg,
-    zMinMm: halfHeightMm,
-    zMaxMm: discHeightMm,
+    zMinMm: rightZMinMm,
+    zMaxMm: rightZMaxMm,
   });
 
   const content = buildScad({ leftNodes, rightNodes });
