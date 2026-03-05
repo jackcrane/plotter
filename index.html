@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Simple Line Drawer</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #111;
+        color: #ddd;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+
+      .wrap {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .bar {
+        padding: 10px 12px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid #222;
+        background: #0f0f0f;
+        user-select: none;
+      }
+
+      .bar code {
+        background: #1b1b1b;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #0b0b0b;
+        cursor: crosshair;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <div class="bar">
+        <div><strong>Line tool</strong></div>
+        <div>Left click: add point</div>
+        <div><code>Right click</code>: end</div>
+      </div>
+      <canvas id="c"></canvas>
+    </div>
+
+    <script type="module">
+      const canvas = document.getElementById("c");
+      const ctx = canvas.getContext("2d", { alpha: false });
+
+      const state = {
+        points: [],
+        isClosedForInput: false, // right click sets this true
+        mouse: { x: 0, y: 0 },
+        dpr: Math.max(1, window.devicePixelRatio || 1),
+      };
+
+      const resizeCanvas = () => {
+        const rect = canvas.getBoundingClientRect();
+        state.dpr = Math.max(1, window.devicePixelRatio || 1);
+
+        canvas.width = Math.round(rect.width * state.dpr);
+        canvas.height = Math.round(rect.height * state.dpr);
+
+        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+        draw();
+      };
+
+      const getMousePos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        };
+      };
+
+      const drawGrid = () => {
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        const step = 25;
+
+        ctx.save();
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = "#141414";
+        for (let x = 0; x <= w; x += step) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, h);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= h; y += step) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      };
+
+      const draw = () => {
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+
+        // clear
+        ctx.clearRect(0, 0, w, h);
+
+        // background fill (since alpha:false, but still safe)
+        ctx.fillStyle = "#0b0b0b";
+        ctx.fillRect(0, 0, w, h);
+
+        drawGrid();
+
+        // draw committed polyline
+        const pts = state.points;
+
+        if (pts.length > 0) {
+          ctx.save();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#eaeaea";
+          ctx.lineJoin = "round";
+          ctx.lineCap = "round";
+
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+          }
+          ctx.stroke();
+          ctx.restore();
+
+          // draw points
+          ctx.save();
+          ctx.fillStyle = "#eaeaea";
+          for (const p of pts) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        // draw rubber-band preview if still accepting input
+        if (!state.isClosedForInput && state.points.length > 0) {
+          const last = state.points[state.points.length - 1];
+
+          ctx.save();
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 6]);
+          ctx.strokeStyle = "#888";
+          ctx.lineCap = "round";
+
+          ctx.beginPath();
+          ctx.moveTo(last.x, last.y);
+          ctx.lineTo(state.mouse.x, state.mouse.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // status text
+        ctx.save();
+        ctx.font =
+          "12px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
+        ctx.fillStyle = "#9a9a9a";
+        const status = state.isClosedForInput
+          ? "ended (right click) — refresh to start over"
+          : "drawing — right click to end";
+        ctx.fillText(`points: ${state.points.length} — ${status}`, 12, h - 12);
+        ctx.restore();
+      };
+
+      const addPoint = (p) => {
+        if (state.isClosedForInput) return;
+        state.points.push({ x: p.x, y: p.y });
+        draw();
+      };
+
+      canvas.addEventListener("mousemove", (e) => {
+        state.mouse = getMousePos(e);
+        draw();
+      });
+
+      canvas.addEventListener("mousedown", (e) => {
+        // left click only
+        if (e.button !== 0) return;
+        addPoint(getMousePos(e));
+      });
+
+      canvas.addEventListener("contextmenu", (e) => {
+        e.preventDefault(); // disable browser menu
+        state.isClosedForInput = true;
+        draw();
+      });
+
+      window.addEventListener("resize", resizeCanvas);
+
+      resizeCanvas();
+    </script>
+  </body>
+</html>
