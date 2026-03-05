@@ -11,6 +11,7 @@ const GEAR_THICKNESS_MM = 10;
 const GEAR_TOOTH_COUNT = 58;
 const GEAR_CIRCULAR_PITCH_MM =
   (DISC_DIAMETER_IN * INCH_TO_MM * Math.PI) / (GEAR_TOOTH_COUNT + 2);
+const CENTER_HOLE_DIAMETER_MM = 20.4;
 
 const formatNumber = (value) => Number(value.toFixed(4));
 
@@ -114,6 +115,7 @@ gear_root_radius = gear_pitch_radius - gear_dedendum;
 gear_tooth_depth = gear_outer_radius - gear_root_radius;
 gear_tooth_base_width = 0.56 * gear_circular_pitch;
 gear_tooth_tip_width = 0.34 * gear_circular_pitch;
+center_hole_diameter = ${CENTER_HOLE_DIAMETER_MM};
 
 left_nodes = [
 ${leftNodesBody}
@@ -171,6 +173,9 @@ difference() {
   }
   wrapped_rect_cut(left_nodes);
   wrapped_rect_cut(right_nodes);
+  translate([0, 0, -gear_thickness - 0.5]) {
+    cylinder(h = disc_height + gear_thickness + 1, d = center_hole_diameter);
+  }
 }
 `;
 };
@@ -195,14 +200,14 @@ export const downloadStackedDiscScad = ({
     "leftDeg",
     durationSec,
     minDeg,
-    maxDeg
+    maxDeg,
   );
   const rightSeries = quantizeSeries(
     samples,
     "rightDeg",
     durationSec,
     minDeg,
-    maxDeg
+    maxDeg,
   );
 
   if (leftSeries.length < 2 || rightSeries.length < 2) {
