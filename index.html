@@ -44,8 +44,8 @@
       }
 
       canvas {
-        width: 100%;
-        height: 100%;
+        width: 400px;
+        height: 400px;
         display: block;
         background: #0b0b0b;
         cursor: crosshair;
@@ -67,10 +67,23 @@
       const canvas = document.getElementById("c");
       const ctx = canvas.getContext("2d", { alpha: false });
 
+      const CANVAS_SIZE = 400;
+
+      const canvasToModel = ({ x, y }) => ({
+        x: x / (CANVAS_SIZE / 2) - 1,
+        y: 1 - y / (CANVAS_SIZE / 2),
+      });
+
+      const modelToCanvas = ({ x, y }) => ({
+        x: (x + 1) * (CANVAS_SIZE / 2),
+        y: (1 - y) * (CANVAS_SIZE / 2),
+      });
+
       const state = {
         points: [],
-        isClosedForInput: false, // right click sets this true
+        isClosedForInput: false,
         mouse: { x: 0, y: 0 },
+        draggingIndex: null,
         dpr: Math.max(1, window.devicePixelRatio || 1),
       };
 
@@ -93,6 +106,17 @@
         };
       };
 
+      const getPointUnderMouse = (p) => {
+        const radius = 8;
+        for (let i = 0; i < state.points.length; i++) {
+          const pt = state.points[i];
+          const dx = pt.x - p.x;
+          const dy = pt.y - p.y;
+          if (dx * dx + dy * dy <= radius * radius) return i;
+        }
+        return null;
+      };
+
       const drawGrid = () => {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
@@ -100,15 +124,15 @@
 
         ctx.save();
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 1;
-
         ctx.strokeStyle = "#141414";
+
         for (let x = 0; x <= w; x += step) {
           ctx.beginPath();
           ctx.moveTo(x, 0);
           ctx.lineTo(x, h);
           ctx.stroke();
         }
+
         for (let y = 0; y <= h; y += step) {
           ctx.beginPath();
           ctx.moveTo(0, y);
@@ -123,16 +147,13 @@
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
 
-        // clear
         ctx.clearRect(0, 0, w, h);
 
-        // background fill (since alpha:false, but still safe)
         ctx.fillStyle = "#0b0b0b";
         ctx.fillRect(0, 0, w, h);
 
         drawGrid();
 
-        // draw committed polyline
         const pts = state.points;
 
         if (pts.length > 0) {
@@ -144,24 +165,26 @@
 
           ctx.beginPath();
           ctx.moveTo(pts[0].x, pts[0].y);
+
           for (let i = 1; i < pts.length; i++) {
             ctx.lineTo(pts[i].x, pts[i].y);
           }
+
           ctx.stroke();
           ctx.restore();
 
-          // draw points
           ctx.save();
           ctx.fillStyle = "#eaeaea";
+
           for (const p of pts) {
             ctx.beginPath();
             ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
             ctx.fill();
           }
+
           ctx.restore();
         }
 
-        // draw rubber-band preview if still accepting input
         if (!state.isClosedForInput && state.points.length > 0) {
           const last = state.points[state.points.length - 1];
 
@@ -169,23 +192,24 @@
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 6]);
           ctx.strokeStyle = "#888";
-          ctx.lineCap = "round";
 
           ctx.beginPath();
           ctx.moveTo(last.x, last.y);
           ctx.lineTo(state.mouse.x, state.mouse.y);
           ctx.stroke();
+
           ctx.restore();
         }
 
-        // status text
         ctx.save();
         ctx.font =
-          "12px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
+          "12px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
         ctx.fillStyle = "#9a9a9a";
+
         const status = state.isClosedForInput
-          ? "ended (right click) — refresh to start over"
+          ? "editing — drag points"
           : "drawing — right click to end";
+
         ctx.fillText(`points: ${state.points.length} — ${status}`, 12, h - 12);
         ctx.restore();
       };
@@ -197,20 +221,64 @@
       };
 
       canvas.addEventListener("mousemove", (e) => {
-        state.mouse = getMousePos(e);
+        const p = getMousePos(e);
+        state.mouse = p;
+
+        if (state.draggingIndex !== null) {
+          state.points[state.draggingIndex].x = p.x;
+          state.points[state.draggingIndex].y = p.y;
+        }
+
         draw();
       });
 
       canvas.addEventListener("mousedown", (e) => {
-        // left click only
-        if (e.button !== 0) return;
-        addPoint(getMousePos(e));
+        const p = getMousePos(e);
+
+        if (state.isClosedForInput) {
+          const idx = getPointUnderMouse(p);
+          if (idx !== null) {
+            state.draggingIndex = idx;
+          }
+          return;
+        }
+
+        if (e.button === 0) addPoint(p);
+      });
+
+      canvas.addEventListener("mouseup", () => {
+        state.draggingIndex = null;
       });
 
       canvas.addEventListener("contextmenu", (e) => {
-        e.preventDefault(); // disable browser menu
+        e.preventDefault();
         state.isClosedForInput = true;
         draw();
+      });
+
+      const getEdges = () => {
+        const edges = [];
+
+        for (let i = 0; i < state.points.length - 1; i++) {
+          const a = canvasToModel(state.points[i]);
+          const b = canvasToModel(state.points[i + 1]);
+
+          edges.push({
+            x1: a.x,
+            y1: a.y,
+            x2: b.x,
+            y2: b.y,
+          });
+        }
+
+        return edges;
+      };
+
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          console.log(getEdges());
+        }
       });
 
       window.addEventListener("resize", resizeCanvas);
