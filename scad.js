@@ -6,6 +6,7 @@ const CUT_HEIGHT_MM = 3.5;
 const CUT_DEPTH_MM = 3;
 const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
+const WRAP_ANGLE_DEGREES = 355;
 
 const formatNumber = (value) => Number(value.toFixed(4));
 
@@ -71,7 +72,7 @@ const mapSeriesToAngularNodes = ({
   const degRange = Math.max(0.001, maxDeg - minDeg);
 
   return series.map((sample) => {
-    const angleDeg = (sample.timeSec / durationSec) * 360;
+    const angleDeg = (sample.timeSec / durationSec) * WRAP_ANGLE_DEGREES;
     const t = (sample.deg - minDeg) / degRange;
     const z = zMinMm + zMarginMm + clamp(t, 0, 1) * zSpanMm;
     return [formatNumber(angleDeg), formatNumber(z)];
