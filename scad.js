@@ -2,8 +2,8 @@ const INCH_TO_MM = 25.4;
 const DISC_DIAMETER_IN = 6;
 const DISC_HEIGHT_IN = 4;
 const CUT_WIDTH_IN = 0.12;
-const CUT_HEIGHT_IN = 0.12;
-const CUT_DEPTH_IN = 0.12;
+const CUT_HEIGHT_MM = 3.5;
+const CUT_DEPTH_MM = 3;
 const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
 
@@ -65,7 +65,7 @@ const mapSeriesToAngularNodes = ({
   zMinMm,
   zMaxMm,
 }) => {
-  const cutHeightMm = CUT_HEIGHT_IN * INCH_TO_MM;
+  const cutHeightMm = CUT_HEIGHT_MM;
   const zMarginMm = cutHeightMm * 0.6;
   const zSpanMm = Math.max(0.001, zMaxMm - zMinMm - zMarginMm * 2);
   const degRange = Math.max(0.001, maxDeg - minDeg);
@@ -93,8 +93,8 @@ disc_diameter = ${DISC_DIAMETER_IN} * inch;
 disc_height = ${DISC_HEIGHT_IN} * inch;
 
 cut_width = ${CUT_WIDTH_IN} * inch;
-cut_height = ${CUT_HEIGHT_IN} * inch;
-cut_depth = ${CUT_DEPTH_IN} * inch;
+cut_height = ${CUT_HEIGHT_MM};
+cut_depth = ${CUT_DEPTH_MM};
 surface_overcut = ${SURFACE_OVERCUT_IN} * inch;
 
 left_nodes = [
