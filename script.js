@@ -6,9 +6,11 @@ import {
   ORIGIN_TO_ELBOW,
   MAX_MOTOR_ANGLE,
 } from "./fiveBar.js";
+import { downloadStackedDiscScad } from "./scad.js";
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d", { alpha: false });
+const downloadScadBtn = document.getElementById("download-scad-btn");
 
 const DRAW_SIZE = 400;
 const EXTRA_WIDTH = 300;
@@ -161,6 +163,49 @@ const buildPlaybackSamples = (segments, totalLength, points) => {
   }
 
   return { samples, totalDurationSec };
+};
+
+const buildPlaybackDataFromPoints = (inputPoints) => {
+  if (inputPoints.length < 2) return null;
+
+  const points = inputPoints.map((p) => ({ x: p.x, y: p.y }));
+  const segments = [];
+  let totalLength = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+
+    if (length === 0) continue;
+
+    const startDistance = totalLength;
+    totalLength += length;
+
+    segments.push({
+      a,
+      b,
+      length,
+      startDistance,
+      endDistance: totalLength,
+    });
+  }
+
+  if (segments.length === 0) return null;
+
+  const { samples, totalDurationSec } = buildPlaybackSamples(
+    segments,
+    totalLength,
+    points
+  );
+
+  return {
+    points,
+    segments,
+    totalLength,
+    samples,
+    totalDurationSec,
+  };
 };
 
 const buildPossiblePixelsCache = () => {
@@ -400,36 +445,11 @@ const startPlayback = () => {
   state.isClosedForInput = true;
   state.draggingIndex = null;
 
-  const points = state.points.map((p) => ({ x: p.x, y: p.y }));
-  const segments = [];
-  let totalLength = 0;
+  const playbackData = buildPlaybackDataFromPoints(state.points);
+  if (!playbackData) return;
 
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-    const length = Math.hypot(b.x - a.x, b.y - a.y);
-
-    if (length === 0) continue;
-
-    const startDistance = totalLength;
-    totalLength += length;
-
-    segments.push({
-      a,
-      b,
-      length,
-      startDistance,
-      endDistance: totalLength,
-    });
-  }
-
-  if (segments.length === 0) return;
-
-  const { samples, totalDurationSec } = buildPlaybackSamples(
-    segments,
-    totalLength,
-    points
-  );
+  const { points, segments, totalLength, samples, totalDurationSec } =
+    playbackData;
 
   state.playback.active = true;
   state.playback.startTime = performance.now();
@@ -443,6 +463,27 @@ const startPlayback = () => {
 
   draw();
   state.playback.rafId = requestAnimationFrame(stepPlayback);
+};
+
+const downloadScads = () => {
+  const playbackData = buildPlaybackDataFromPoints(state.points);
+
+  if (!playbackData || playbackData.samples.length === 0) {
+    window.alert("Draw a valid path first, then export SCAD.");
+    return;
+  }
+
+  try {
+    downloadStackedDiscScad({
+      samples: playbackData.samples,
+      totalDurationSec: playbackData.totalDurationSec,
+      minDeg: -MAX_MOTOR_ANGLE,
+      maxDeg: MAX_MOTOR_ANGLE,
+    });
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || "Failed to generate SCAD file.");
+  }
 };
 
 const drawPlaybackTrace = () => {
@@ -747,5 +788,6 @@ window.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+downloadScadBtn?.addEventListener("click", downloadScads);
 
 resizeCanvas();

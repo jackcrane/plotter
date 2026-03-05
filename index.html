@@ -43,6 +43,20 @@
         border-radius: 6px;
       }
 
+      .bar button {
+        margin-left: auto;
+        background: #1f1f1f;
+        color: #ddd;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      .bar button:hover {
+        background: #2a2a2a;
+      }
+
       canvas {
         width: 700px;
         height: 520px;
@@ -59,6 +73,7 @@
         <div><strong>Line tool</strong></div>
         <div>Left click: add point</div>
         <div><code>Right click</code>: end</div>
+        <button id="download-scad-btn" type="button">Download SCAD</button>
       </div>
       <canvas id="c"></canvas>
     </div>
