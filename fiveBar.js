@@ -1,8 +1,10 @@
 export const LEFT_ORIGIN = { x: 1.75, y: 0.25 };
 export const RIGHT_ORIGIN = { x: 1.75, y: -0.25 };
 
-export const ORIGIN_TO_ELBOW = 0.8;
+export const ORIGIN_TO_ELBOW = 0.7;
 export const ELBOW_TO_EFFECTOR = 1.75;
+
+export const MAX_MOTOR_ANGLE = 80;
 
 const normalizeAngle = (a) => {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -10,26 +12,6 @@ const normalizeAngle = (a) => {
   return a;
 };
 
-/**
- * Computes the actuator angles for a planar symmetric 5-bar linkage so the
- * end effector reaches a given (x,y) point.
- *
- * Geometry:
- *  - Two motors at fixed origins
- *  - Each motor drives a link to an elbow
- *  - A second link connects the elbow to the end effector
- *
- * This solves the inverse kinematics of each side as a 2-link arm.
- * Multiple valid configurations exist (elbow up/down), so this returns
- * all possible solutions.
- *
- * @param {number} x - Target end effector x coordinate
- * @param {number} y - Target end effector y coordinate
- *
- * @returns {Array<{left:number,right:number}>}
- * Array of valid solutions. Angles are in radians.
- * `left` and `right` correspond to the angles of the two motor joints.
- */
 export const solveFiveBarIK = (x, y) => {
   const solveSide = (origin) => {
     const dx = x - origin.x;
@@ -58,8 +40,15 @@ export const solveFiveBarIK = (x, y) => {
       const l = normalizeAngle(lRaw);
       const r = normalizeAngle(rRaw);
 
-      const topValid = l >= 0 && l <= Math.PI; // top motor faces upward
-      const bottomValid = r <= 0 && r >= -Math.PI; // bottom motor faces downward
+      const LIMIT = (MAX_MOTOR_ANGLE * Math.PI) / 180;
+
+      const TOP_CENTER = Math.PI / 2;
+      const BOTTOM_CENTER = -Math.PI / 2;
+
+      const topValid = l >= TOP_CENTER - LIMIT && l <= TOP_CENTER + LIMIT;
+
+      const bottomValid =
+        r >= BOTTOM_CENTER - LIMIT && r <= BOTTOM_CENTER + LIMIT;
 
       if (topValid && bottomValid) {
         solutions.push({ left: l, right: r });

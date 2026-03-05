@@ -4,7 +4,7 @@ import {
   LEFT_ORIGIN,
   RIGHT_ORIGIN,
   ORIGIN_TO_ELBOW,
-  ELBOW_TO_EFFECTOR,
+  MAX_MOTOR_ANGLE,
 } from "./fiveBar.js";
 
 const canvas = document.getElementById("c");
@@ -139,6 +139,37 @@ const drawRedPoints = () => {
   ctx.restore();
 };
 
+const drawMotorLimits = () => {
+  const drawLimit = (origin, startAngle, endAngle) => {
+    const o = modelToCanvas(origin);
+
+    const R = ORIGIN_TO_ELBOW * (DRAW_SIZE / 2);
+
+    ctx.save();
+
+    ctx.fillStyle = "rgba(120,120,120,0.18)";
+    ctx.strokeStyle = "rgba(160,160,160,0.35)";
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(o.x, o.y);
+    ctx.arc(o.x, o.y, R, -startAngle, -endAngle, true);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  };
+
+  const LIMIT = (MAX_MOTOR_ANGLE * Math.PI) / 180;
+
+  const TOP_CENTER = Math.PI / 2;
+  const BOTTOM_CENTER = -Math.PI / 2;
+
+  drawLimit(LEFT_ORIGIN, TOP_CENTER - LIMIT, TOP_CENTER + LIMIT);
+  drawLimit(RIGHT_ORIGIN, BOTTOM_CENTER - LIMIT, BOTTOM_CENTER + LIMIT);
+};
+
 const highlightPossiblePixels = () => {
   if (possiblePixelsCanvas) {
     ctx.drawImage(possiblePixelsCanvas, 0, 0);
@@ -204,6 +235,7 @@ const draw = () => {
   ctx.fillRect(DRAW_SIZE, 0, EXTRA_WIDTH, DRAW_SIZE);
 
   highlightPossiblePixels();
+  drawMotorLimits();
 
   drawGrid();
 
