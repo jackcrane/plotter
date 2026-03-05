@@ -12,7 +12,10 @@ const ctx = canvas.getContext("2d", { alpha: false });
 
 const DRAW_SIZE = 400;
 const EXTRA_WIDTH = 300;
+const GRAPH_HEIGHT = 120;
 const TOTAL_WIDTH = DRAW_SIZE + EXTRA_WIDTH;
+const TOTAL_HEIGHT = DRAW_SIZE + GRAPH_HEIGHT;
+const PLAYBACK_SAMPLE_HZ = 60;
 
 let possiblePixelsCanvas = null;
 
@@ -38,13 +41,127 @@ const state = {
     startTime: 0,
     distance: 0,
     totalLength: 0,
+    totalDurationSec: 0,
     points: [],
     segments: [],
+    samples: [],
     target: null,
   },
 };
 
 const PLAYBACK_SPEED_PX_PER_SEC = 120;
+
+const clampToDrawArea = (p) => ({
+  x: Math.max(0, Math.min(DRAW_SIZE, p.x)),
+  y: Math.max(0, Math.min(DRAW_SIZE, p.y)),
+});
+
+const isInDrawArea = (p) =>
+  p.x >= 0 && p.x <= DRAW_SIZE && p.y >= 0 && p.y <= DRAW_SIZE;
+
+const radiansToDegrees = (rad) => (rad * 180) / Math.PI;
+const toGraphDegrees = (deg) => Math.abs(deg) - 80;
+
+const chooseClosestSolution = (solutions, previousSolution) => {
+  if (!previousSolution || solutions.length <= 1) return solutions[0];
+
+  let best = solutions[0];
+  let bestDistance =
+    Math.abs(best.left - previousSolution.left) +
+    Math.abs(best.right - previousSolution.right);
+
+  for (let i = 1; i < solutions.length; i++) {
+    const candidate = solutions[i];
+    const candidateDistance =
+      Math.abs(candidate.left - previousSolution.left) +
+      Math.abs(candidate.right - previousSolution.right);
+
+    if (candidateDistance < bestDistance) {
+      best = candidate;
+      bestDistance = candidateDistance;
+    }
+  }
+
+  return best;
+};
+
+const getPlaybackTargetAtDistanceFromPath = (
+  distance,
+  segments,
+  totalLength,
+  points
+) => {
+  const d = Math.max(0, Math.min(distance, totalLength));
+
+  for (const seg of segments) {
+    if (d <= seg.endDistance) {
+      const segD = d - seg.startDistance;
+      const t = seg.length === 0 ? 0 : segD / seg.length;
+      return {
+        x: seg.a.x + (seg.b.x - seg.a.x) * t,
+        y: seg.a.y + (seg.b.y - seg.a.y) * t,
+      };
+    }
+  }
+
+  return points[points.length - 1] || null;
+};
+
+const buildPlaybackSamples = (segments, totalLength, points) => {
+  if (segments.length === 0 || totalLength <= 0) {
+    return { samples: [], totalDurationSec: 0 };
+  }
+
+  const totalDurationSec = totalLength / PLAYBACK_SPEED_PX_PER_SEC;
+  const stepDistance = PLAYBACK_SPEED_PX_PER_SEC / PLAYBACK_SAMPLE_HZ;
+
+  const distances = [0];
+  for (let d = stepDistance; d < totalLength; d += stepDistance) {
+    distances.push(d);
+  }
+  distances.push(totalLength);
+
+  const samples = [];
+  let previousSolution = null;
+
+  for (const d of distances) {
+    const target = getPlaybackTargetAtDistanceFromPath(
+      d,
+      segments,
+      totalLength,
+      points
+    );
+
+    if (!target) continue;
+
+    const targetModel = canvasToModel(target);
+    const solutions = solveFiveBarIK(targetModel.x, targetModel.y);
+
+    if (solutions.length === 0) {
+      samples.push({
+        timeSec: d / PLAYBACK_SPEED_PX_PER_SEC,
+        leftDeg: null,
+        rightDeg: null,
+      });
+      previousSolution = null;
+      continue;
+    }
+
+    const selectedSolution = chooseClosestSolution(solutions, previousSolution);
+    previousSolution = selectedSolution;
+
+    const leftDeg = radiansToDegrees(selectedSolution.left);
+    const rightDeg = radiansToDegrees(selectedSolution.right);
+
+    samples.push({
+      timeSec: d / PLAYBACK_SPEED_PX_PER_SEC,
+      leftDeg: toGraphDegrees(leftDeg),
+      rightDeg: toGraphDegrees(rightDeg),
+    });
+  }
+
+  return { samples, totalDurationSec };
+};
 
 const buildPossiblePixelsCache = () => {
   const off = document.createElement("canvas");
@@ -247,20 +364,12 @@ const stopPlayback = () => {
 };
 
 const getPlaybackTargetAtDistance = (distance) => {
-  const d = Math.max(0, Math.min(distance, state.playback.totalLength));
-
-  for (const seg of state.playback.segments) {
-    if (d <= seg.endDistance) {
-      const segD = d - seg.startDistance;
-      const t = seg.length === 0 ? 0 : segD / seg.length;
-      return {
-        x: seg.a.x + (seg.b.x - seg.a.x) * t,
-        y: seg.a.y + (seg.b.y - seg.a.y) * t,
-      };
-    }
-  }
-
-  return state.playback.points[state.playback.points.length - 1] || null;
+  return getPlaybackTargetAtDistanceFromPath(
+    distance,
+    state.playback.segments,
+    state.playback.totalLength,
+    state.playback.points
+  );
 };
 
 const stepPlayback = (now) => {
@@ -316,12 +425,20 @@ const startPlayback = () => {
 
   if (segments.length === 0) return;
 
+  const { samples, totalDurationSec } = buildPlaybackSamples(
+    segments,
+    totalLength,
+    points
+  );
+
   state.playback.active = true;
   state.playback.startTime = performance.now();
   state.playback.distance = 0;
   state.playback.totalLength = totalLength;
+  state.playback.totalDurationSec = totalDurationSec;
   state.playback.points = points;
   state.playback.segments = segments;
+  state.playback.samples = samples;
   state.playback.target = points[0];
 
   draw();
@@ -361,8 +478,127 @@ const drawPlaybackTrace = () => {
   ctx.restore();
 };
 
+const drawPlaybackGraph = () => {
+  if (state.playback.samples.length === 0) return;
+
+  const graphX = 0;
+  const graphY = DRAW_SIZE;
+  const graphWidth = TOTAL_WIDTH;
+  const graphHeight = GRAPH_HEIGHT;
+
+  const padding = {
+    left: 48,
+    right: 16,
+    top: 12,
+    bottom: 22,
+  };
+
+  const plotX = graphX + padding.left;
+  const plotY = graphY + padding.top;
+  const plotWidth = graphWidth - padding.left - padding.right;
+  const plotHeight = graphHeight - padding.top - padding.bottom;
+
+  const minDeg = -MAX_MOTOR_ANGLE;
+  const maxDeg = MAX_MOTOR_ANGLE;
+  const yRange = maxDeg - minDeg;
+  const durationSec = Math.max(0.001, state.playback.totalDurationSec);
+
+  const xForTime = (timeSec) =>
+    plotX + (Math.max(0, Math.min(timeSec, durationSec)) / durationSec) * plotWidth;
+  const yForDeg = (deg) => plotY + ((maxDeg - deg) / yRange) * plotHeight;
+
+  ctx.save();
+
+  ctx.fillStyle = "#0b0b0b";
+  ctx.fillRect(graphX, graphY, graphWidth, graphHeight);
+
+  ctx.strokeStyle = "#1f1f1f";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(graphX, graphY + 0.5);
+  ctx.lineTo(graphX + graphWidth, graphY + 0.5);
+  ctx.stroke();
+
+  const yTicks = [-80, -40, 0, 40, 80];
+  ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+  ctx.fillStyle = "#888";
+  ctx.strokeStyle = "#2a2a2a";
+
+  for (const tick of yTicks) {
+    const y = yForDeg(tick);
+    ctx.beginPath();
+    ctx.moveTo(plotX, y);
+    ctx.lineTo(plotX + plotWidth, y);
+    ctx.stroke();
+    ctx.fillText(`${tick}`, graphX + 8, y + 4);
+  }
+
+  const xTickCount = 6;
+  for (let i = 0; i <= xTickCount; i++) {
+    const t = (durationSec * i) / xTickCount;
+    const x = xForTime(t);
+    ctx.beginPath();
+    ctx.moveTo(x, plotY);
+    ctx.lineTo(x, plotY + plotHeight);
+    ctx.stroke();
+    ctx.fillText(`${t.toFixed(1)}s`, x - 10, graphY + graphHeight - 6);
+  }
+
+  const drawSeries = (key, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    let started = false;
+    for (const sample of state.playback.samples) {
+      const deg = sample[key];
+      if (deg === null) {
+        started = false;
+        continue;
+      }
+
+      const x = xForTime(sample.timeSec);
+      const y = yForDeg(deg);
+
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+
+    ctx.stroke();
+  };
+
+  drawSeries("leftDeg", "#4af");
+  drawSeries("rightDeg", "#fa4");
+
+  const headTimeSec = state.playback.active
+    ? state.playback.distance / PLAYBACK_SPEED_PX_PER_SEC
+    : state.playback.totalDurationSec;
+  const headX = xForTime(headTimeSec);
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(headX, plotY);
+  ctx.lineTo(headX, plotY + plotHeight);
+  ctx.stroke();
+
+  ctx.fillStyle = "#9a9a9a";
+  ctx.fillText("Motor Position (deg)", graphX + 8, graphY + 10);
+
+  ctx.fillStyle = "#4af";
+  ctx.fillText("left", graphWidth - 72, graphY + 14);
+  ctx.fillStyle = "#fa4";
+  ctx.fillText("right", graphWidth - 40, graphY + 14);
+
+  ctx.restore();
+};
+
 const draw = () => {
-  ctx.clearRect(0, 0, TOTAL_WIDTH, DRAW_SIZE);
+  ctx.clearRect(0, 0, TOTAL_WIDTH, TOTAL_HEIGHT);
 
   ctx.fillStyle = "hsl(0, 0%, 4%)";
   ctx.fillRect(0, 0, DRAW_SIZE, DRAW_SIZE);
@@ -410,6 +646,7 @@ const draw = () => {
 
   if (!state.isClosedForInput && pts.length > 0) {
     const last = pts[pts.length - 1];
+    const mouseInDrawArea = clampToDrawArea(state.mouse);
 
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 6]);
@@ -417,7 +654,7 @@ const draw = () => {
 
     ctx.beginPath();
     ctx.moveTo(last.x, last.y);
-    ctx.lineTo(state.mouse.x, state.mouse.y);
+    ctx.lineTo(mouseInDrawArea.x, mouseInDrawArea.y);
     ctx.stroke();
   }
 
@@ -426,7 +663,7 @@ const draw = () => {
   const linkageTargetCanvas =
     state.playback.active && state.playback.target
       ? state.playback.target
-      : state.mouse;
+      : clampToDrawArea(state.mouse);
 
   const linkageTargetModel = canvasToModel(linkageTargetCanvas);
   const solutions = solveFiveBarIK(linkageTargetModel.x, linkageTargetModel.y);
@@ -449,11 +686,13 @@ const draw = () => {
 
   ctx.fillText(`points: ${state.points.length} — ${status}`, 12, 388);
   ctx.restore();
+
+  drawPlaybackGraph();
 };
 
 const addPoint = (p) => {
   if (state.isClosedForInput) return;
-  if (p.x > DRAW_SIZE) return;
+  if (!isInDrawArea(p)) return;
   state.points.push({ x: p.x, y: p.y });
   draw();
 };
@@ -464,7 +703,7 @@ canvas.addEventListener("mousemove", (e) => {
 
   if (state.playback.active) return;
 
-  if (state.draggingIndex !== null && p.x <= DRAW_SIZE) {
+  if (state.draggingIndex !== null && isInDrawArea(p)) {
     state.points[state.draggingIndex].x = p.x;
     state.points[state.draggingIndex].y = p.y;
   }
@@ -477,7 +716,7 @@ canvas.addEventListener("mousedown", (e) => {
 
   const p = getMousePos(e);
 
-  if (p.x > DRAW_SIZE) return;
+  if (!isInDrawArea(p)) return;
 
   if (state.isClosedForInput) {
     const idx = getPointUnderMouse(p);
@@ -494,6 +733,8 @@ canvas.addEventListener("mouseup", () => {
 
 canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+  const p = getMousePos(e);
+  if (!isInDrawArea(p)) return;
   state.isClosedForInput = true;
   draw();
 });
