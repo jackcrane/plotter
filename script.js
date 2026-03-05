@@ -32,7 +32,19 @@ const state = {
   mouse: { x: 0, y: 0 },
   draggingIndex: null,
   dpr: Math.max(1, window.devicePixelRatio || 1),
+  playback: {
+    active: false,
+    rafId: null,
+    startTime: 0,
+    distance: 0,
+    totalLength: 0,
+    points: [],
+    segments: [],
+    target: null,
+  },
 };
+
+const PLAYBACK_SPEED_PX_PER_SEC = 120;
 
 const buildPossiblePixelsCache = () => {
   const off = document.createElement("canvas");
@@ -225,6 +237,130 @@ const drawLinkageSolution = (solution, target) => {
   ctx.restore();
 };
 
+const stopPlayback = () => {
+  if (state.playback.rafId !== null) {
+    cancelAnimationFrame(state.playback.rafId);
+  }
+
+  state.playback.active = false;
+  state.playback.rafId = null;
+};
+
+const getPlaybackTargetAtDistance = (distance) => {
+  const d = Math.max(0, Math.min(distance, state.playback.totalLength));
+
+  for (const seg of state.playback.segments) {
+    if (d <= seg.endDistance) {
+      const segD = d - seg.startDistance;
+      const t = seg.length === 0 ? 0 : segD / seg.length;
+      return {
+        x: seg.a.x + (seg.b.x - seg.a.x) * t,
+        y: seg.a.y + (seg.b.y - seg.a.y) * t,
+      };
+    }
+  }
+
+  return state.playback.points[state.playback.points.length - 1] || null;
+};
+
+const stepPlayback = (now) => {
+  if (!state.playback.active) return;
+
+  const elapsedSec = (now - state.playback.startTime) / 1000;
+  const distance = elapsedSec * PLAYBACK_SPEED_PX_PER_SEC;
+  const cappedDistance = Math.min(distance, state.playback.totalLength);
+
+  state.playback.distance = cappedDistance;
+  state.playback.target = getPlaybackTargetAtDistance(cappedDistance);
+
+  draw();
+
+  if (distance >= state.playback.totalLength) {
+    stopPlayback();
+    return;
+  }
+
+  state.playback.rafId = requestAnimationFrame(stepPlayback);
+};
+
+const startPlayback = () => {
+  if (state.points.length < 2) return;
+
+  stopPlayback();
+
+  state.isClosedForInput = true;
+  state.draggingIndex = null;
+
+  const points = state.points.map((p) => ({ x: p.x, y: p.y }));
+  const segments = [];
+  let totalLength = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+
+    if (length === 0) continue;
+
+    const startDistance = totalLength;
+    totalLength += length;
+
+    segments.push({
+      a,
+      b,
+      length,
+      startDistance,
+      endDistance: totalLength,
+    });
+  }
+
+  if (segments.length === 0) return;
+
+  state.playback.active = true;
+  state.playback.startTime = performance.now();
+  state.playback.distance = 0;
+  state.playback.totalLength = totalLength;
+  state.playback.points = points;
+  state.playback.segments = segments;
+  state.playback.target = points[0];
+
+  draw();
+  state.playback.rafId = requestAnimationFrame(stepPlayback);
+};
+
+const drawPlaybackTrace = () => {
+  if (!state.playback.active || state.playback.points.length === 0) return;
+
+  let remaining = state.playback.distance;
+  const first = state.playback.points[0];
+
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#4df";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+
+  for (const seg of state.playback.segments) {
+    if (remaining >= seg.length) {
+      ctx.lineTo(seg.b.x, seg.b.y);
+      remaining -= seg.length;
+      continue;
+    }
+
+    const t = seg.length === 0 ? 0 : remaining / seg.length;
+    ctx.lineTo(
+      seg.a.x + (seg.b.x - seg.a.x) * t,
+      seg.a.y + (seg.b.y - seg.a.y) * t
+    );
+    break;
+  }
+
+  ctx.stroke();
+  ctx.restore();
+};
+
 const draw = () => {
   ctx.clearRect(0, 0, TOTAL_WIDTH, DRAW_SIZE);
 
@@ -268,6 +404,8 @@ const draw = () => {
       ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    drawPlaybackTrace();
   }
 
   if (!state.isClosedForInput && pts.length > 0) {
@@ -285,11 +423,16 @@ const draw = () => {
 
   ctx.restore();
 
-  const mouseModel = canvasToModel(state.mouse);
-  const solutions = solveFiveBarIK(mouseModel.x, mouseModel.y);
+  const linkageTargetCanvas =
+    state.playback.active && state.playback.target
+      ? state.playback.target
+      : state.mouse;
+
+  const linkageTargetModel = canvasToModel(linkageTargetCanvas);
+  const solutions = solveFiveBarIK(linkageTargetModel.x, linkageTargetModel.y);
 
   if (solutions.length > 0) {
-    drawLinkageSolution(solutions[0], mouseModel);
+    drawLinkageSolution(solutions[0], linkageTargetModel);
   }
   drawRedPoints();
 
@@ -299,7 +442,9 @@ const draw = () => {
   ctx.fillStyle = "#9a9a9a";
 
   const status = state.isClosedForInput
-    ? "editing — drag points"
+    ? state.playback.active
+      ? "playing — tracing edges"
+      : "editing — drag points"
     : "drawing — right click to end";
 
   ctx.fillText(`points: ${state.points.length} — ${status}`, 12, 388);
@@ -317,6 +462,8 @@ canvas.addEventListener("mousemove", (e) => {
   const p = getMousePos(e);
   state.mouse = p;
 
+  if (state.playback.active) return;
+
   if (state.draggingIndex !== null && p.x <= DRAW_SIZE) {
     state.points[state.draggingIndex].x = p.x;
     state.points[state.draggingIndex].y = p.y;
@@ -326,6 +473,8 @@ canvas.addEventListener("mousemove", (e) => {
 });
 
 canvas.addEventListener("mousedown", (e) => {
+  if (state.playback.active) return;
+
   const p = getMousePos(e);
 
   if (p.x > DRAW_SIZE) return;
@@ -349,28 +498,10 @@ canvas.addEventListener("contextmenu", (e) => {
   draw();
 });
 
-const getEdges = () => {
-  const edges = [];
-
-  for (let i = 0; i < state.points.length - 1; i++) {
-    const a = canvasToModel(state.points[i]);
-    const b = canvasToModel(state.points[i + 1]);
-
-    edges.push({
-      x1: a.x,
-      y1: a.y,
-      x2: b.x,
-      y2: b.y,
-    });
-  }
-
-  return edges;
-};
-
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
-    console.log(getEdges());
+    startPlayback();
   }
 });
 
