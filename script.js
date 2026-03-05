@@ -1,4 +1,11 @@
-import { pointIsPossible } from "./fiveBar.js";
+import {
+  pointIsPossible,
+  solveFiveBarIK,
+  LEFT_ORIGIN,
+  RIGHT_ORIGIN,
+  ORIGIN_TO_ELBOW,
+  ELBOW_TO_EFFECTOR,
+} from "./fiveBar.js";
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -138,6 +145,55 @@ const highlightPossiblePixels = () => {
   }
 };
 
+const drawLinkageSolution = (solution, target) => {
+  const leftElbow = {
+    x: LEFT_ORIGIN.x + Math.cos(solution.left) * ORIGIN_TO_ELBOW,
+    y: LEFT_ORIGIN.y + Math.sin(solution.left) * ORIGIN_TO_ELBOW,
+  };
+
+  const rightElbow = {
+    x: RIGHT_ORIGIN.x + Math.cos(solution.right) * ORIGIN_TO_ELBOW,
+    y: RIGHT_ORIGIN.y + Math.sin(solution.right) * ORIGIN_TO_ELBOW,
+  };
+
+  const lo = modelToCanvas(LEFT_ORIGIN);
+  const ro = modelToCanvas(RIGHT_ORIGIN);
+  const le = modelToCanvas(leftElbow);
+  const re = modelToCanvas(rightElbow);
+  const t = modelToCanvas(target);
+
+  ctx.save();
+  ctx.lineWidth = 2;
+
+  // left arm
+  ctx.strokeStyle = "#4af";
+  ctx.beginPath();
+  ctx.moveTo(lo.x, lo.y);
+  ctx.lineTo(le.x, le.y);
+  ctx.lineTo(t.x, t.y);
+  ctx.stroke();
+
+  // right arm
+  ctx.strokeStyle = "#fa4";
+  ctx.beginPath();
+  ctx.moveTo(ro.x, ro.y);
+  ctx.lineTo(re.x, re.y);
+  ctx.lineTo(t.x, t.y);
+  ctx.stroke();
+
+  ctx.fillStyle = "#fff";
+
+  ctx.beginPath();
+  ctx.arc(le.x, le.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(re.x, re.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+};
+
 const draw = () => {
   ctx.clearRect(0, 0, TOTAL_WIDTH, DRAW_SIZE);
 
@@ -197,6 +253,12 @@ const draw = () => {
 
   ctx.restore();
 
+  const mouseModel = canvasToModel(state.mouse);
+  const solutions = solveFiveBarIK(mouseModel.x, mouseModel.y);
+
+  if (solutions.length > 0) {
+    drawLinkageSolution(solutions[0], mouseModel);
+  }
   drawRedPoints();
 
   ctx.save();

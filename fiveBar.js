@@ -1,8 +1,8 @@
-const LEFT_ORIGIN = { x: 1.75, y: 0.25 };
-const RIGHT_ORIGIN = { x: 1.75, y: -0.25 };
+export const LEFT_ORIGIN = { x: 1.75, y: 0.25 };
+export const RIGHT_ORIGIN = { x: 1.75, y: -0.25 };
 
-const ORIGIN_TO_ELBOW = 0.6;
-const ELBOW_TO_EFFECTOR = 1.75;
+export const ORIGIN_TO_ELBOW = 0.8;
+export const ELBOW_TO_EFFECTOR = 1.75;
 
 const normalizeAngle = (a) => {
   while (a > Math.PI) a -= 2 * Math.PI;
