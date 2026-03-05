@@ -7,6 +7,10 @@ const CUT_DEPTH_MM = 3;
 const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
 const WRAP_ANGLE_DEGREES = 355;
+const GEAR_THICKNESS_MM = 10;
+const GEAR_TOOTH_COUNT = 58;
+const GEAR_CIRCULAR_PITCH_MM =
+  (DISC_DIAMETER_IN * INCH_TO_MM * Math.PI) / (GEAR_TOOTH_COUNT + 2);
 
 const formatNumber = (value) => Number(value.toFixed(4));
 
@@ -86,7 +90,7 @@ const buildScad = ({ leftNodes, rightNodes }) => {
   const leftNodesBody = nodesToScadArray(leftNodes);
   const rightNodesBody = nodesToScadArray(rightNodes);
 
-  return `// 6in x 4in disc with stacked wrapped cuts
+  return `// 6in x 4in disc with stacked wrapped cuts and a bottom gear
 $fn = 192;
 
 inch = ${INCH_TO_MM};
@@ -97,6 +101,19 @@ cut_width = ${CUT_WIDTH_IN} * inch;
 cut_height = ${CUT_HEIGHT_MM};
 cut_depth = ${CUT_DEPTH_MM};
 surface_overcut = ${SURFACE_OVERCUT_IN} * inch;
+
+gear_thickness = ${GEAR_THICKNESS_MM};
+gear_teeth = ${GEAR_TOOTH_COUNT};
+gear_circular_pitch = ${formatNumber(GEAR_CIRCULAR_PITCH_MM)};
+gear_module = gear_circular_pitch / PI;
+gear_addendum = gear_module;
+gear_dedendum = 1.25 * gear_module;
+gear_outer_radius = disc_diameter / 2;
+gear_pitch_radius = gear_outer_radius - gear_addendum;
+gear_root_radius = gear_pitch_radius - gear_dedendum;
+gear_tooth_depth = gear_outer_radius - gear_root_radius;
+gear_tooth_base_width = 0.56 * gear_circular_pitch;
+gear_tooth_tip_width = 0.34 * gear_circular_pitch;
 
 left_nodes = [
 ${leftNodesBody}
@@ -125,8 +142,33 @@ module wrapped_rect_cut(nodes) {
   }
 }
 
+module bottom_gear() {
+  translate([0, 0, -gear_thickness]) {
+    union() {
+      cylinder(h = gear_thickness, r = gear_root_radius);
+      for (i = [0 : gear_teeth - 1]) {
+        rotate([0, 0, i * 360 / gear_teeth]) {
+          translate([gear_root_radius, 0, 0]) {
+            linear_extrude(height = gear_thickness) {
+              polygon([
+                [0, -gear_tooth_base_width / 2],
+                [gear_tooth_depth, -gear_tooth_tip_width / 2],
+                [gear_tooth_depth, gear_tooth_tip_width / 2],
+                [0, gear_tooth_base_width / 2]
+              ]);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 difference() {
-  cylinder(h = disc_height, d = disc_diameter);
+  union() {
+    bottom_gear();
+    cylinder(h = disc_height, d = disc_diameter);
+  }
   wrapped_rect_cut(left_nodes);
   wrapped_rect_cut(right_nodes);
 }
