@@ -1,6 +1,6 @@
 const INCH_TO_MM = 25.4;
-const DISC_DIAMETER_IN = 6;
-const DISC_HEIGHT_IN = 4;
+const DISC_DIAMETER_IN = 4;
+const DISC_HEIGHT_IN = 2;
 const CUT_WIDTH_IN = 0.12;
 const CUT_HEIGHT_MM = 3.5;
 const CUT_DEPTH_MM = 3;
@@ -8,10 +8,10 @@ const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
 const WRAP_ANGLE_DEGREES = 355;
 const GEAR_THICKNESS_MM = 10;
-const GEAR_TOOTH_COUNT = 58;
+const GEAR_TOOTH_COUNT = 38;
 const GEAR_CIRCULAR_PITCH_MM =
   (DISC_DIAMETER_IN * INCH_TO_MM * Math.PI) / (GEAR_TOOTH_COUNT + 2);
-const CENTER_HOLE_DIAMETER_MM = 20.4;
+const CENTER_HOLE_DIAMETER_MM = 10.4;
 
 const formatNumber = (value) => Number(value.toFixed(4));
 
@@ -91,7 +91,7 @@ const buildScad = ({ leftNodes, rightNodes }) => {
   const leftNodesBody = nodesToScadArray(leftNodes);
   const rightNodesBody = nodesToScadArray(rightNodes);
 
-  return `// 6in x 4in disc with stacked wrapped cuts and a bottom gear
+  return `// 4in x 2in disc with stacked wrapped cuts and a bottom gear
 $fn = 192;
 
 inch = ${INCH_TO_MM};
