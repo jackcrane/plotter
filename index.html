@@ -23,8 +23,11 @@
 
       .wrap {
         height: 100%;
+        min-height: 100dvh;
         display: grid;
         grid-template-rows: auto 1fr;
+        min-width: 0;
+        min-height: 0;
       }
 
       .bar {
@@ -62,12 +65,17 @@
         background: #2a2a2a;
       }
 
+      .stage {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+      }
+
       canvas {
-        width: 700px;
-        height: 520px;
         display: block;
         background: #000;
         cursor: crosshair;
+        margin: auto;
       }
     </style>
   </head>
@@ -83,7 +91,9 @@
           <button id="download-scad-btn" type="button">Download SCAD</button>
         </div>
       </div>
-      <canvas id="c"></canvas>
+      <div class="stage">
+        <canvas id="c"></canvas>
+      </div>
       <input
         id="upload-scad-input"
         type="file"

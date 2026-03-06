@@ -11,6 +11,7 @@ import { downloadStackedDiscScad, parseStackedDiscScad } from "./scad.js";
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d", { alpha: false });
+const stage = canvas.parentElement;
 const uploadScadBtn = document.getElementById("upload-scad-btn");
 const uploadScadInput = document.getElementById("upload-scad-input");
 const downloadScadBtn = document.getElementById("download-scad-btn");
@@ -244,12 +245,28 @@ const buildPossiblePixelsCache = () => {
 };
 
 const resizeCanvas = () => {
-  buildPossiblePixelsCache();
-  const rect = canvas.getBoundingClientRect();
-  state.dpr = Math.max(1, window.devicePixelRatio || 1);
+  if (!possiblePixelsCanvas) {
+    buildPossiblePixelsCache();
+  }
 
-  canvas.width = Math.round(rect.width * state.dpr);
-  canvas.height = Math.round(rect.height * state.dpr);
+  const stageRect = stage.getBoundingClientRect();
+  if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+  const aspect = TOTAL_WIDTH / TOTAL_HEIGHT;
+  let cssWidth = stageRect.width;
+  let cssHeight = cssWidth / aspect;
+
+  if (cssHeight > stageRect.height) {
+    cssHeight = stageRect.height;
+    cssWidth = cssHeight * aspect;
+  }
+
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+
+  state.dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.round(TOTAL_WIDTH * state.dpr);
+  canvas.height = Math.round(TOTAL_HEIGHT * state.dpr);
 
   ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
   draw();
@@ -257,9 +274,11 @@ const resizeCanvas = () => {
 
 const getMousePos = (e) => {
   const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width > 0 ? TOTAL_WIDTH / rect.width : 1;
+  const scaleY = rect.height > 0 ? TOTAL_HEIGHT / rect.height : 1;
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY,
   };
 };
 
