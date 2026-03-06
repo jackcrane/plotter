@@ -2,7 +2,7 @@ const INCH_TO_MM = 25.4;
 const DISC_DIAMETER_IN = 4;
 const DISC_HEIGHT_IN = 2;
 const CUT_WIDTH_IN = 0.12;
-const CUT_HEIGHT_MM = 3.5;
+const CUT_HEIGHT_MM = 5.5;
 const CUT_DEPTH_MM = 3;
 const SURFACE_OVERCUT_IN = 0.02;
 const QUANTIZED_POINT_COUNT = 480;
@@ -223,7 +223,9 @@ export const downloadStackedDiscScad = ({
   const singleEngravingSpanMm = engravingSpanMm / 2;
 
   if (singleEngravingSpanMm <= CUT_HEIGHT_MM) {
-    throw new Error("Disc height is too small for requested engraving margins.");
+    throw new Error(
+      "Disc height is too small for requested engraving margins.",
+    );
   }
 
   const leftZMinMm = engravingMarginMm;
