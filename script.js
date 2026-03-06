@@ -4,12 +4,15 @@ import {
   LEFT_ORIGIN,
   RIGHT_ORIGIN,
   ORIGIN_TO_ELBOW,
+  ELBOW_TO_EFFECTOR,
   MAX_MOTOR_ANGLE,
 } from "./fiveBar.js";
-import { downloadStackedDiscScad } from "./scad.js";
+import { downloadStackedDiscScad, parseStackedDiscScad } from "./scad.js";
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d", { alpha: false });
+const uploadScadBtn = document.getElementById("upload-scad-btn");
+const uploadScadInput = document.getElementById("upload-scad-input");
 const downloadScadBtn = document.getElementById("download-scad-btn");
 
 const DRAW_SIZE = 400;
@@ -61,6 +64,7 @@ const clampToDrawArea = (p) => ({
 const isInDrawArea = (p) =>
   p.x >= 0 && p.x <= DRAW_SIZE && p.y >= 0 && p.y <= DRAW_SIZE;
 
+const degreesToRadians = (deg) => (deg * Math.PI) / 180;
 const radiansToDegrees = (rad) => (rad * 180) / Math.PI;
 const toGraphDegrees = (deg) => Math.abs(deg) - 80;
 
@@ -397,6 +401,147 @@ const drawLinkageSolution = (solution, target) => {
   ctx.fill();
 
   ctx.restore();
+};
+
+const getCircleIntersections = (c0, c1, radius) => {
+  const dx = c1.x - c0.x;
+  const dy = c1.y - c0.y;
+  const d = Math.hypot(dx, dy);
+
+  if (d === 0 || d > radius * 2) return [];
+
+  const a = d / 2;
+  const hSquared = radius * radius - a * a;
+
+  if (hSquared < 0) return [];
+
+  const h = Math.sqrt(Math.max(0, hSquared));
+  const midX = c0.x + (dx * 0.5);
+  const midY = c0.y + (dy * 0.5);
+  const unitX = dx / d;
+  const unitY = dy / d;
+  const perpX = -unitY;
+  const perpY = unitX;
+
+  const pA = {
+    x: midX + perpX * h,
+    y: midY + perpY * h,
+  };
+  const pB = {
+    x: midX - perpX * h,
+    y: midY - perpY * h,
+  };
+
+  if (h === 0) return [pA];
+  return [pA, pB];
+};
+
+const graphDegToMotorRad = (graphDeg, side) => {
+  if (!Number.isFinite(graphDeg)) return null;
+
+  const motorAbsDeg = graphDeg + 80;
+  if (!Number.isFinite(motorAbsDeg)) return null;
+
+  const signedDeg = side === "left" ? motorAbsDeg : -motorAbsDeg;
+  return degreesToRadians(signedDeg);
+};
+
+const chooseImportedTarget = (candidates, previous) => {
+  if (candidates.length === 0) return null;
+  if (!previous) {
+    return candidates.reduce((best, candidate) =>
+      candidate.x < best.x ? candidate : best,
+    );
+  }
+
+  let best = candidates[0];
+  let bestDistance = Math.hypot(best.x - previous.x, best.y - previous.y);
+
+  for (let i = 1; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    const dist = Math.hypot(candidate.x - previous.x, candidate.y - previous.y);
+    if (dist < bestDistance) {
+      best = candidate;
+      bestDistance = dist;
+    }
+  }
+
+  return best;
+};
+
+const buildApproxPointsFromScadSamples = (samples) => {
+  const points = [];
+  let previousTarget = null;
+
+  for (const sample of samples) {
+    const leftRad = graphDegToMotorRad(sample.leftDeg, "left");
+    const rightRad = graphDegToMotorRad(sample.rightDeg, "right");
+    if (leftRad === null || rightRad === null) continue;
+
+    const leftElbow = {
+      x: LEFT_ORIGIN.x + Math.cos(leftRad) * ORIGIN_TO_ELBOW,
+      y: LEFT_ORIGIN.y + Math.sin(leftRad) * ORIGIN_TO_ELBOW,
+    };
+    const rightElbow = {
+      x: RIGHT_ORIGIN.x + Math.cos(rightRad) * ORIGIN_TO_ELBOW,
+      y: RIGHT_ORIGIN.y + Math.sin(rightRad) * ORIGIN_TO_ELBOW,
+    };
+
+    const intersections = getCircleIntersections(
+      leftElbow,
+      rightElbow,
+      ELBOW_TO_EFFECTOR,
+    );
+    if (intersections.length === 0) continue;
+
+    const chosenTarget = chooseImportedTarget(intersections, previousTarget);
+    if (!chosenTarget) continue;
+    previousTarget = chosenTarget;
+
+    const canvasPoint = modelToCanvas(chosenTarget);
+    if (!isInDrawArea(canvasPoint)) continue;
+
+    const prevCanvasPoint = points[points.length - 1];
+    if (
+      prevCanvasPoint &&
+      Math.hypot(
+        prevCanvasPoint.x - canvasPoint.x,
+        prevCanvasPoint.y - canvasPoint.y,
+      ) < 0.5
+    ) {
+      continue;
+    }
+
+    points.push(canvasPoint);
+  }
+
+  return points;
+};
+
+const importScadContent = (content) => {
+  const { samples, totalDurationSec } = parseStackedDiscScad({
+    content,
+    minDeg: -MAX_MOTOR_ANGLE,
+    maxDeg: MAX_MOTOR_ANGLE,
+  });
+
+  const approxPoints = buildApproxPointsFromScadSamples(samples);
+
+  stopPlayback();
+
+  state.points = approxPoints;
+  state.isClosedForInput = approxPoints.length > 0;
+  state.draggingIndex = null;
+
+  state.playback.distance = 0;
+  state.playback.totalLength = 0;
+  state.playback.totalDurationSec = totalDurationSec;
+  state.playback.points = [];
+  state.playback.segments = [];
+  state.playback.samples = samples;
+  state.playback.target = null;
+
+  draw();
 };
 
 const stopPlayback = () => {
@@ -784,6 +929,25 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
     startPlayback();
+  }
+});
+
+uploadScadBtn?.addEventListener("click", () => {
+  uploadScadInput?.click();
+});
+
+uploadScadInput?.addEventListener("change", async () => {
+  const file = uploadScadInput.files?.[0];
+  uploadScadInput.value = "";
+
+  if (!file) return;
+
+  try {
+    const content = await file.text();
+    importScadContent(content);
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || "Failed to import SCAD file.");
   }
 });
 

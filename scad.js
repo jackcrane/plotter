@@ -89,6 +89,104 @@ const mapSeriesToAngularNodes = ({
 const nodesToScadArray = (nodes) =>
   nodes.map((node) => `  [${node[0]}, ${node[1]}]`).join(",\n");
 
+const getEngravingBands = () => {
+  const discHeightMm = DISC_HEIGHT_IN * INCH_TO_MM;
+  const engravingMarginMm = ENGRAVING_MARGIN_IN * INCH_TO_MM;
+  const totalMarginsMm = engravingMarginMm * 3;
+  const engravingSpanMm = discHeightMm - totalMarginsMm;
+  const singleEngravingSpanMm = engravingSpanMm / 2;
+
+  if (singleEngravingSpanMm <= CUT_HEIGHT_MM) {
+    throw new Error(
+      "Disc height is too small for requested engraving margins.",
+    );
+  }
+
+  const leftZMinMm = engravingMarginMm;
+  const leftZMaxMm = leftZMinMm + singleEngravingSpanMm;
+  const rightZMinMm = leftZMaxMm + engravingMarginMm;
+  const rightZMaxMm = rightZMinMm + singleEngravingSpanMm;
+
+  return {
+    left: { zMinMm: leftZMinMm, zMaxMm: leftZMaxMm },
+    right: { zMinMm: rightZMinMm, zMaxMm: rightZMaxMm },
+  };
+};
+
+const parseNodesFromScad = (content, variableName) => {
+  const escapedVariableName = variableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const blockMatch = content.match(
+    new RegExp(`${escapedVariableName}\\s*=\\s*\\[([\\s\\S]*?)\\];`),
+  );
+
+  if (!blockMatch) {
+    throw new Error(`Could not find ${variableName} in SCAD file.`);
+  }
+
+  const body = blockMatch[1];
+  const pairRegex =
+    /\[\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*,\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*\]/g;
+  const nodes = [];
+
+  let pairMatch;
+  while ((pairMatch = pairRegex.exec(body)) !== null) {
+    nodes.push([Number.parseFloat(pairMatch[1]), Number.parseFloat(pairMatch[2])]);
+  }
+
+  if (nodes.length < 2) {
+    throw new Error(`Expected at least 2 entries in ${variableName}.`);
+  }
+
+  return nodes;
+};
+
+const mapAngularNodesToSeries = ({
+  nodes,
+  minDeg,
+  maxDeg,
+  zMinMm,
+  zMaxMm,
+  totalDurationSec,
+}) => {
+  const cutHeightMm = CUT_HEIGHT_MM;
+  const zCenterMinMm = zMinMm + cutHeightMm / 2;
+  const zCenterMaxMm = zMaxMm - cutHeightMm / 2;
+  const zSpanMm = Math.max(0.001, zCenterMaxMm - zCenterMinMm);
+  const degRange = Math.max(0.001, maxDeg - minDeg);
+
+  return nodes
+    .map(([angleDeg, zMm]) => {
+      const normalizedTime = clamp(angleDeg / WRAP_ANGLE_DEGREES, 0, 1);
+      const normalizedDeg = clamp((zMm - zCenterMinMm) / zSpanMm, 0, 1);
+      return {
+        timeSec: normalizedTime * totalDurationSec,
+        deg: minDeg + normalizedDeg * degRange,
+      };
+    })
+    .sort((a, b) => a.timeSec - b.timeSec);
+};
+
+const mergeSeriesSamples = ({ leftSeries, rightSeries, totalDurationSec }) => {
+  const timeSet = new Set();
+
+  for (const sample of leftSeries) {
+    timeSet.add(sample.timeSec.toFixed(6));
+  }
+  for (const sample of rightSeries) {
+    timeSet.add(sample.timeSec.toFixed(6));
+  }
+
+  const times = Array.from(timeSet, (value) => Number.parseFloat(value)).sort(
+    (a, b) => a - b,
+  );
+
+  return times.map((timeSec) => ({
+    timeSec: clamp(timeSec, 0, totalDurationSec),
+    leftDeg: interpolateSeriesValue(leftSeries, timeSec),
+    rightDeg: interpolateSeriesValue(rightSeries, timeSec),
+  }));
+};
+
 const buildScad = ({ leftNodes, rightNodes }) => {
   const leftNodesBody = nodesToScadArray(leftNodes);
   const rightNodesBody = nodesToScadArray(rightNodes);
@@ -216,30 +314,15 @@ export const downloadStackedDiscScad = ({
     throw new Error("Need valid left and right graph data to export.");
   }
 
-  const discHeightMm = DISC_HEIGHT_IN * INCH_TO_MM;
-  const engravingMarginMm = ENGRAVING_MARGIN_IN * INCH_TO_MM;
-  const totalMarginsMm = engravingMarginMm * 3;
-  const engravingSpanMm = discHeightMm - totalMarginsMm;
-  const singleEngravingSpanMm = engravingSpanMm / 2;
-
-  if (singleEngravingSpanMm <= CUT_HEIGHT_MM) {
-    throw new Error(
-      "Disc height is too small for requested engraving margins.",
-    );
-  }
-
-  const leftZMinMm = engravingMarginMm;
-  const leftZMaxMm = leftZMinMm + singleEngravingSpanMm;
-  const rightZMinMm = leftZMaxMm + engravingMarginMm;
-  const rightZMaxMm = rightZMinMm + singleEngravingSpanMm;
+  const engravingBands = getEngravingBands();
 
   const leftNodes = mapSeriesToAngularNodes({
     series: leftSeries,
     durationSec,
     minDeg,
     maxDeg,
-    zMinMm: leftZMinMm,
-    zMaxMm: leftZMaxMm,
+    zMinMm: engravingBands.left.zMinMm,
+    zMaxMm: engravingBands.left.zMaxMm,
   });
 
   const rightNodes = mapSeriesToAngularNodes({
@@ -247,8 +330,8 @@ export const downloadStackedDiscScad = ({
     durationSec,
     minDeg,
     maxDeg,
-    zMinMm: rightZMinMm,
-    zMaxMm: rightZMaxMm,
+    zMinMm: engravingBands.right.zMinMm,
+    zMaxMm: engravingBands.right.zMaxMm,
   });
 
   const content = buildScad({ leftNodes, rightNodes });
@@ -265,4 +348,56 @@ export const downloadStackedDiscScad = ({
   setTimeout(() => URL.revokeObjectURL(url), 0);
 
   return { filename, content };
+};
+
+export const parseStackedDiscScad = ({ content, minDeg, maxDeg }) => {
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("SCAD file is empty.");
+  }
+
+  if (
+    !Number.isFinite(minDeg) ||
+    !Number.isFinite(maxDeg) ||
+    maxDeg <= minDeg
+  ) {
+    throw new Error("Invalid degree range for SCAD import.");
+  }
+
+  const leftNodes = parseNodesFromScad(content, "left_nodes");
+  const rightNodes = parseNodesFromScad(content, "right_nodes");
+  const engravingBands = getEngravingBands();
+
+  // Wrapped SCAD encodes relative time in angle, so recover a normalized timeline.
+  const totalDurationSec = 1;
+  const leftSeries = mapAngularNodesToSeries({
+    nodes: leftNodes,
+    minDeg,
+    maxDeg,
+    zMinMm: engravingBands.left.zMinMm,
+    zMaxMm: engravingBands.left.zMaxMm,
+    totalDurationSec,
+  });
+  const rightSeries = mapAngularNodesToSeries({
+    nodes: rightNodes,
+    minDeg,
+    maxDeg,
+    zMinMm: engravingBands.right.zMinMm,
+    zMaxMm: engravingBands.right.zMaxMm,
+    totalDurationSec,
+  });
+
+  const samples = mergeSeriesSamples({
+    leftSeries,
+    rightSeries,
+    totalDurationSec,
+  });
+
+  if (samples.length < 2) {
+    throw new Error("Could not recover graph samples from SCAD file.");
+  }
+
+  return {
+    samples,
+    totalDurationSec,
+  };
 };

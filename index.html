@@ -44,13 +44,18 @@
       }
 
       .bar button {
-        margin-left: auto;
         background: #1f1f1f;
         color: #ddd;
         border: 1px solid #333;
         border-radius: 6px;
         padding: 6px 10px;
         cursor: pointer;
+      }
+
+      .bar .actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
       }
 
       .bar button:hover {
@@ -73,9 +78,18 @@
         <div><strong>Line tool</strong></div>
         <div>Left click: add point</div>
         <div><code>Right click</code>: end</div>
-        <button id="download-scad-btn" type="button">Download SCAD</button>
+        <div class="actions">
+          <button id="upload-scad-btn" type="button">Upload Drum</button>
+          <button id="download-scad-btn" type="button">Download SCAD</button>
+        </div>
       </div>
       <canvas id="c"></canvas>
+      <input
+        id="upload-scad-input"
+        type="file"
+        accept=".scad,text/plain"
+        hidden
+      />
     </div>
 
     <script type="module" src="script.js"></script>
