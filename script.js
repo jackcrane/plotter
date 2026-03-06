@@ -21,6 +21,8 @@ const GRAPH_HEIGHT = 120;
 const TOTAL_WIDTH = DRAW_SIZE + EXTRA_WIDTH;
 const TOTAL_HEIGHT = DRAW_SIZE + GRAPH_HEIGHT;
 const PLAYBACK_SAMPLE_HZ = 60;
+const DRAW_DRAG_SPACING_PX = 10;
+const DRAW_POINT_MERGE_THRESHOLD_PX = 0.5;
 
 let possiblePixelsCanvas = null;
 
@@ -39,6 +41,8 @@ const state = {
   isClosedForInput: false,
   mouse: { x: 0, y: 0 },
   draggingIndex: null,
+  drawingWithMouse: false,
+  lastDrawSample: null,
   dpr: Math.max(1, window.devicePixelRatio || 1),
   playback: {
     active: false,
@@ -868,7 +872,7 @@ const draw = () => {
     ? state.playback.active
       ? "playing — tracing edges"
       : "editing — drag points"
-    : "drawing — right click to end";
+    : "drawing — click/drag, right click to end";
 
   ctx.fillText(`points: ${state.points.length} — ${status}`, 12, 388);
   ctx.restore();
@@ -879,8 +883,51 @@ const draw = () => {
 const addPoint = (p) => {
   if (state.isClosedForInput) return;
   if (!isInDrawArea(p)) return;
+  const last = state.points[state.points.length - 1];
+  if (
+    last &&
+    Math.hypot(last.x - p.x, last.y - p.y) <= DRAW_POINT_MERGE_THRESHOLD_PX
+  ) {
+    return;
+  }
   state.points.push({ x: p.x, y: p.y });
+};
+
+const addPointAndDraw = (p) => {
+  addPoint(p);
   draw();
+};
+
+const addInterpolatedDragPoints = (mousePoint) => {
+  if (state.isClosedForInput || !state.drawingWithMouse) return;
+  const target = clampToDrawArea(mousePoint);
+
+  let last = state.lastDrawSample || state.points[state.points.length - 1];
+  if (!last) {
+    addPoint(target);
+    state.lastDrawSample = target;
+    return;
+  }
+
+  let distance = Math.hypot(target.x - last.x, target.y - last.y);
+  while (distance >= DRAW_DRAG_SPACING_PX) {
+    const t = DRAW_DRAG_SPACING_PX / distance;
+    const next = {
+      x: last.x + (target.x - last.x) * t,
+      y: last.y + (target.y - last.y) * t,
+    };
+    addPoint(next);
+    last = next;
+    state.lastDrawSample = next;
+    distance = Math.hypot(target.x - last.x, target.y - last.y);
+  }
+};
+
+const finishMouseDrawing = (mousePoint) => {
+  if (!state.drawingWithMouse) return;
+  addPoint(clampToDrawArea(mousePoint));
+  state.drawingWithMouse = false;
+  state.lastDrawSample = null;
 };
 
 canvas.addEventListener("mousemove", (e) => {
@@ -892,6 +939,15 @@ canvas.addEventListener("mousemove", (e) => {
   if (state.draggingIndex !== null && isInDrawArea(p)) {
     state.points[state.draggingIndex].x = p.x;
     state.points[state.draggingIndex].y = p.y;
+  }
+
+  if (!state.isClosedForInput && state.drawingWithMouse && (e.buttons & 1)) {
+    addInterpolatedDragPoints(p);
+  }
+
+  if (!state.isClosedForInput && state.drawingWithMouse && !(e.buttons & 1)) {
+    state.drawingWithMouse = false;
+    state.lastDrawSample = null;
   }
 
   draw();
@@ -910,11 +966,19 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
-  if (e.button === 0) addPoint(p);
+  if (e.button === 0) {
+    addPointAndDraw(p);
+    state.drawingWithMouse = true;
+    state.lastDrawSample = p;
+  }
 });
 
-canvas.addEventListener("mouseup", () => {
+canvas.addEventListener("mouseup", (e) => {
+  if (!state.isClosedForInput && e.button === 0) {
+    finishMouseDrawing(getMousePos(e));
+  }
   state.draggingIndex = null;
+  draw();
 });
 
 canvas.addEventListener("contextmenu", (e) => {
