@@ -85,8 +85,11 @@
       <div class="bar">
         <div><strong>Line tool</strong></div>
         <div>Left click: add point</div>
-        <div><code>Right click</code>: end</div>
+        <div><code>Right click</code>: end (outside image)</div>
+        <div>Wheel: zoom image</div>
+        <div>Right drag: move image</div>
         <div class="actions">
+          <button id="upload-image-btn" type="button">Upload Image</button>
           <button id="upload-scad-btn" type="button">Upload Drum</button>
           <button id="download-scad-btn" type="button">Download SCAD</button>
         </div>
@@ -94,6 +97,12 @@
       <div class="stage">
         <canvas id="c"></canvas>
       </div>
+      <input
+        id="upload-image-input"
+        type="file"
+        accept="image/*"
+        hidden
+      />
       <input
         id="upload-scad-input"
         type="file"

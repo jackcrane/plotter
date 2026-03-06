@@ -12,6 +12,8 @@ import { downloadStackedDiscScad, parseStackedDiscScad } from "./scad.js";
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d", { alpha: false });
 const stage = canvas.parentElement;
+const uploadImageBtn = document.getElementById("upload-image-btn");
+const uploadImageInput = document.getElementById("upload-image-input");
 const uploadScadBtn = document.getElementById("upload-scad-btn");
 const uploadScadInput = document.getElementById("upload-scad-input");
 const downloadScadBtn = document.getElementById("download-scad-btn");
@@ -24,6 +26,10 @@ const TOTAL_HEIGHT = DRAW_SIZE + GRAPH_HEIGHT;
 const PLAYBACK_SAMPLE_HZ = 60;
 const DRAW_DRAG_SPACING_PX = 10;
 const DRAW_POINT_MERGE_THRESHOLD_PX = 0.5;
+const POSSIBLE_REGION_ALPHA_WITH_IMAGE = 90;
+const IMAGE_ZOOM_SENSITIVITY = 0.0015;
+const MIN_IMAGE_SCALE = 0.05;
+const MAX_IMAGE_SCALE = 20;
 
 let possiblePixelsCanvas = null;
 
@@ -44,6 +50,17 @@ const state = {
   draggingIndex: null,
   drawingWithMouse: false,
   lastDrawSample: null,
+  backgroundImage: {
+    element: null,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+  },
+  imagePan: {
+    active: false,
+    lastMouse: null,
+    suppressContextClose: false,
+  },
   dpr: Math.max(1, window.devicePixelRatio || 1),
   playback: {
     active: false,
@@ -293,6 +310,99 @@ const getPointUnderMouse = (p) => {
   return null;
 };
 
+const getBackgroundImageDrawRect = () => {
+  const image = state.backgroundImage.element;
+  if (!image) return null;
+
+  return {
+    x: state.backgroundImage.offsetX,
+    y: state.backgroundImage.offsetY,
+    width: image.naturalWidth * state.backgroundImage.scale,
+    height: image.naturalHeight * state.backgroundImage.scale,
+  };
+};
+
+const isPointOverBackgroundImage = (p) => {
+  const rect = getBackgroundImageDrawRect();
+  if (!rect) return false;
+
+  return (
+    p.x >= rect.x &&
+    p.x <= rect.x + rect.width &&
+    p.y >= rect.y &&
+    p.y <= rect.y + rect.height
+  );
+};
+
+const fitBackgroundImageToDrawArea = (image) => {
+  if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+
+  const scale = Math.min(
+    DRAW_SIZE / image.naturalWidth,
+    DRAW_SIZE / image.naturalHeight
+  );
+
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
+
+  state.backgroundImage.element = image;
+  state.backgroundImage.scale = scale;
+  state.backgroundImage.offsetX = (DRAW_SIZE - width) / 2;
+  state.backgroundImage.offsetY = (DRAW_SIZE - height) / 2;
+};
+
+const zoomBackgroundImageAtPoint = (point, wheelDeltaY) => {
+  const image = state.backgroundImage.element;
+  if (!image) return;
+
+  const oldScale = state.backgroundImage.scale;
+  const zoomFactor = Math.exp(-wheelDeltaY * IMAGE_ZOOM_SENSITIVITY);
+  const nextScale = Math.max(
+    MIN_IMAGE_SCALE,
+    Math.min(MAX_IMAGE_SCALE, oldScale * zoomFactor)
+  );
+
+  if (nextScale === oldScale) return;
+
+  const imageX = (point.x - state.backgroundImage.offsetX) / oldScale;
+  const imageY = (point.y - state.backgroundImage.offsetY) / oldScale;
+
+  state.backgroundImage.scale = nextScale;
+  state.backgroundImage.offsetX = point.x - imageX * nextScale;
+  state.backgroundImage.offsetY = point.y - imageY * nextScale;
+};
+
+const drawBackgroundImage = () => {
+  const image = state.backgroundImage.element;
+  const rect = getBackgroundImageDrawRect();
+  if (!image || !rect) return;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, DRAW_SIZE, DRAW_SIZE);
+  ctx.clip();
+  ctx.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+  ctx.restore();
+};
+
+const loadImageFromFile = (file) =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not load image file."));
+    };
+
+    image.src = objectUrl;
+  });
+
 const drawGrid = () => {
   const step = 25;
 
@@ -373,7 +483,12 @@ const drawMotorLimits = () => {
 
 const highlightPossiblePixels = () => {
   if (possiblePixelsCanvas) {
+    ctx.save();
+    if (state.backgroundImage.element) {
+      ctx.globalAlpha = POSSIBLE_REGION_ALPHA_WITH_IMAGE / 255;
+    }
     ctx.drawImage(possiblePixelsCanvas, 0, 0);
+    ctx.restore();
   }
 };
 
@@ -812,6 +927,8 @@ const draw = () => {
   ctx.fillStyle = "hsl(0, 0%, 4%)";
   ctx.fillRect(0, 0, DRAW_SIZE, DRAW_SIZE);
 
+  drawBackgroundImage();
+
   ctx.fillStyle = "#000";
   ctx.fillRect(DRAW_SIZE, 0, EXTRA_WIDTH, DRAW_SIZE);
 
@@ -891,7 +1008,7 @@ const draw = () => {
     ? state.playback.active
       ? "playing — tracing edges"
       : "editing — drag points"
-    : "drawing — click/drag, right click to end";
+    : "drawing — click/drag, right click to end (outside image)";
 
   ctx.fillText(`points: ${state.points.length} — ${status}`, 12, 388);
   ctx.restore();
@@ -953,6 +1070,20 @@ canvas.addEventListener("mousemove", (e) => {
   const p = getMousePos(e);
   state.mouse = p;
 
+  if (state.imagePan.active) {
+    if (e.buttons & 2) {
+      const prev = state.imagePan.lastMouse || p;
+      state.backgroundImage.offsetX += p.x - prev.x;
+      state.backgroundImage.offsetY += p.y - prev.y;
+      state.imagePan.lastMouse = p;
+      draw();
+      return;
+    }
+
+    state.imagePan.active = false;
+    state.imagePan.lastMouse = null;
+  }
+
   if (state.playback.active) return;
 
   if (state.draggingIndex !== null && isInDrawArea(p)) {
@@ -976,10 +1107,21 @@ canvas.addEventListener("mousedown", (e) => {
   if (state.playback.active) return;
 
   const p = getMousePos(e);
+  state.mouse = p;
 
   if (!isInDrawArea(p)) return;
 
+  if (e.button === 2) {
+    if (isPointOverBackgroundImage(p)) {
+      state.imagePan.active = true;
+      state.imagePan.lastMouse = p;
+      state.imagePan.suppressContextClose = true;
+    }
+    return;
+  }
+
   if (state.isClosedForInput) {
+    if (e.button !== 0) return;
     const idx = getPointUnderMouse(p);
     if (idx !== null) state.draggingIndex = idx;
     return;
@@ -993,25 +1135,83 @@ canvas.addEventListener("mousedown", (e) => {
 });
 
 canvas.addEventListener("mouseup", (e) => {
+  if (e.button === 2) {
+    state.imagePan.active = false;
+    state.imagePan.lastMouse = null;
+  }
+
   if (!state.isClosedForInput && e.button === 0) {
     finishMouseDrawing(getMousePos(e));
   }
-  state.draggingIndex = null;
+
+  if (e.button === 0) {
+    state.draggingIndex = null;
+  }
+
   draw();
 });
 
 canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+
   const p = getMousePos(e);
-  if (!isInDrawArea(p)) return;
+  if (!isInDrawArea(p)) {
+    state.imagePan.suppressContextClose = false;
+    state.imagePan.active = false;
+    state.imagePan.lastMouse = null;
+    return;
+  }
+
+  if (state.imagePan.suppressContextClose || isPointOverBackgroundImage(p)) {
+    state.imagePan.suppressContextClose = false;
+    state.imagePan.active = false;
+    state.imagePan.lastMouse = null;
+    return;
+  }
+
+  state.imagePan.suppressContextClose = false;
   state.isClosedForInput = true;
   draw();
 });
+
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    const p = getMousePos(e);
+    if (!isInDrawArea(p)) return;
+    if (!state.backgroundImage.element) return;
+
+    e.preventDefault();
+    zoomBackgroundImageAtPoint(p, e.deltaY);
+    draw();
+  },
+  { passive: false }
+);
 
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
     startPlayback();
+  }
+});
+
+uploadImageBtn?.addEventListener("click", () => {
+  uploadImageInput?.click();
+});
+
+uploadImageInput?.addEventListener("change", async () => {
+  const file = uploadImageInput.files?.[0];
+  uploadImageInput.value = "";
+
+  if (!file) return;
+
+  try {
+    const image = await loadImageFromFile(file);
+    fitBackgroundImageToDrawArea(image);
+    draw();
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || "Failed to import image file.");
   }
 });
 
